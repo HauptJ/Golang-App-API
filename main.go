@@ -6,17 +6,16 @@ TODO: Implement JWT authentication
 SEE: https://medium.com/@raul_11817/securing-golang-api-using-json-web-token-jwt-2dc363792a48
 */
 
-
 package main
 
 import (
 	"encoding/json"
+	"github.com/gorilla/context"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 	"log"
 	"net/http"
 	"time"
-	"gopkg.in/mgo.v2/bson"
-	"github.com/gorilla/context"
-	"gopkg.in/mgo.v2"
 )
 
 /*
@@ -25,21 +24,21 @@ import (
 const DB_HOST = "10.5.0.2"
 
 type app struct {
-	ID bson.ObjectId `json:"id" bson:"_id"`
-	Company string	 `json:"company" bson:"company"`
-	Position string  `json:"position" bson:"position"`
-	Contact string	 `json:"contact" bson:"contact"`
-	Source string		 `json:"source" bson:"source"`
-	Heading string	 `json:"heading" bson:"heading"`
-	Note1 string	   `json:"note1" bson:"note1"`
-	Note2 string	   `json:"note2" bson:"note2"`
-	Skill1 string		 `json:"skill1" bson:"skill1"`
-	Skill2 string		 `json:"skill2" bson:"skill2"`
-	Skill3 string		 `json:"skill3" bson:"skill3"`
-	Local bool			 `json:"local" bson:"local"`
-	Url string			 `json:"url" bson:"url"`
-	MailTo string		 `json:"mailto" bson:"mailto"`
-	When time.Time	 `json:"when" bson:"when"`
+	ID       bson.ObjectId `json:"id" bson:"_id"`
+	Company  string        `json:"company" bson:"company"`
+	Position string        `json:"position" bson:"position"`
+	Contact  string        `json:"contact" bson:"contact"`
+	Source   string        `json:"source" bson:"source"`
+	Heading  string        `json:"heading" bson:"heading"`
+	Note1    string        `json:"note1" bson:"note1"`
+	Note2    string        `json:"note2" bson:"note2"`
+	Skill1   string        `json:"skill1" bson:"skill1"`
+	Skill2   string        `json:"skill2" bson:"skill2"`
+	Skill3   string        `json:"skill3" bson:"skill3"`
+	Local    bool          `json:"local" bson:"local"`
+	Url      string        `json:"url" bson:"url"`
+	MailTo   string        `json:"mailto" bson:"mailto"`
+	When     time.Time     `json:"when" bson:"when"`
 }
 
 type Adapter func(http.Handler) http.Handler
@@ -61,7 +60,6 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Not supported", http.StatusMethodNotAllowed)
 	}
 }
-
 
 func handleInsert(w http.ResponseWriter, r *http.Request) {
 
@@ -130,17 +128,16 @@ func withDB(db *mgo.Session) Adapter {
 	}
 }
 
-
 func main() {
 
 	// connect to the database
-  mongoDBDialInfo := &mgo.DialInfo{
-    Addrs: []string{DB_HOST},
-    Timeout: 60 * time.Second,
-    Database: "admin",
-    Username: "admin",
-    Password: "password",
-  }
+	mongoDBDialInfo := &mgo.DialInfo{
+		Addrs:    []string{DB_HOST},
+		Timeout:  60 * time.Second,
+		Database: "admin",
+		Username: "admin",
+		Password: "password",
+	}
 
 	db, err := mgo.DialWithInfo(mongoDBDialInfo)
 	if err != nil {
