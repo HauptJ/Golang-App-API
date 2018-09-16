@@ -10,149 +10,163 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/gorilla/context"
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
 	"log"
 	"net/http"
+	"fmt"
+	"strings"
 	"time"
+
+	//"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/gorilla/context"
+	"github.com/gorilla/mux"
+
+	//. "./config"
+	. "./dao"
+	. "./models"
 )
 
 /*
   Constant Declarations
 */
-const DB_HOST = "10.5.0.2"
 
-type app struct {
-	ID       bson.ObjectId `json:"id" bson:"_id"`
-	Company  string        `json:"company" bson:"company"`
-	Position string        `json:"position" bson:"position"`
-	Contact  string        `json:"contact" bson:"contact"`
-	Source   string        `json:"source" bson:"source"`
-	Heading  string        `json:"heading" bson:"heading"`
-	Note1    string        `json:"note1" bson:"note1"`
-	Note2    string        `json:"note2" bson:"note2"`
-	Skill1   string        `json:"skill1" bson:"skill1"`
-	Skill2   string        `json:"skill2" bson:"skill2"`
-	Skill3   string        `json:"skill3" bson:"skill3"`
-	Local    bool          `json:"local" bson:"local"`
-	Url      string        `json:"url" bson:"url"`
-	MailTo   string        `json:"mailto" bson:"mailto"`
-	When     time.Time     `json:"when" bson:"when"`
+type JwtToken struct {
+	Token string `json:"token"`
 }
 
-type Adapter func(http.Handler) http.Handler
-
-func Adapt(h http.Handler, adapters ...Adapter) http.Handler {
-	for _, adapter := range adapters {
-		h = adapter(h)
-	}
-	return h
+type Exception struct {
+	Message string `json:"message"`
 }
 
-func handle(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-		handleRead(w, r)
-	case "POST":
-		handleInsert(w, r)
-	default:
-		http.Error(w, "Not supported", http.StatusMethodNotAllowed)
-	}
-}
+//var config = Config{}
+var dao = AppsDAO{}
 
-func handleInsert(w http.ResponseWriter, r *http.Request) {
-
-	db := context.Get(r, "database").(*mgo.Session)
-
-	// decode the request body
-	var appl app
-	if err := json.NewDecoder(r.Body).Decode(&appl); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// give the app a unique ID
-	appl.ID = bson.NewObjectId()
-	appl.When = time.Now()
-
-	// insert it into the database
-	if err := db.DB("applapp").C("apps").Insert(&appl); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// redirect to it
-	http.Redirect(w, r, "/apps/"+appl.ID.Hex(), http.StatusTemporaryRedirect)
-}
-
-func handleRead(w http.ResponseWriter, r *http.Request) {
-
-	db := context.Get(r, "database").(*mgo.Session)
-
-	// load the apps
-	var apps []*app
-	if err := db.DB("applapp").C("apps").
-		Find(nil).Sort("-when").All(&apps); err != nil {
-
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// write out all the apps
-	if err := json.NewEncoder(w).Encode(apps); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-}
-
-func withDB(db *mgo.Session) Adapter {
-
-	// return the Adapter
-	return func(h http.Handler) http.Handler {
-
-		// the adapter (when called) should return a new handler
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-			// copy the database session
-			dbsession := db.Copy()
-			defer dbsession.Close() // clean up
-
-			// save it in the mux context
-			context.Set(r, "database", dbsession)
-
-			// pass execution to the original handler
-			h.ServeHTTP(w, r)
-
+func CreateTokenEndpoint(w http.ResponseWriter, req *http.Request) {
+	var authUser User
+	_ = json.NewDecoder(req.Body).Decode(&authUser)
+	valid, err := dao.ValidateUser(authUser)
+	if valid == true && err == nil {
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"username": authUser.Username,
+			"password": authUser.Password,
 		})
+		tokenString, err := token.SignedString([]byte("secret"))
+		if err != nil {
+			fmt.Println(err)
+		}
+		json.NewEncoder(w).Encode(JwtToken{Token: tokenString})
+	} else {
+		respondWithError(w, http.StatusUnauthorized, "Unauthorized")
 	}
 }
+
+
+func ValidateMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		authorizationHeader := req.Header.Get("authorization")
+	  if authorizationHeader != "" {
+			bearerToken := strings.Split(authorizationHeader, " ")
+			if len(bearerToken) == 2 {
+				token, error := jwt.Parse(bearerToken[1], func(token *jwt.Token) (interface{}, error) {
+					if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+						return nil, fmt.Errorf("Token Signing Error")
+					}
+					return []byte("secret"), nil
+				})
+				if error != nil {
+					json.NewEncoder(w).Encode(Exception{Message: error.Error()})
+					return
+				}
+				if token.Valid {
+					context.Set(req, "decoded", token.Claims)
+					next(w, req)
+				} else {
+					json.NewEncoder(w).Encode(Exception{Message: "Invalid authorization token"})
+				}
+			}
+		} else {
+			json.NewEncoder(w).Encode(Exception{Message: "An authorization header is required"})
+		}
+	})
+}
+
+
+func AllAppsEndpoint(w http.ResponseWriter, req *http.Request) { // Works
+	apps, err := dao.FindApps("all")
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else {
+	  respondWithJson(w, http.StatusOK, apps)
+	}
+}
+
+func FindAppsEndpoint(w http.ResponseWriter, req *http.Request) { // NOTE: BROKEN. params["company"] does not work as it returns an empty map
+  fmt.Println(req)
+	params := mux.Vars(req)
+	fmt.Println(params)
+	apps, err := dao.FindApps(params["company"])
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid Company Name")
+		return
+	} else {
+		respondWithJson(w, http.StatusOK, apps)
+	}
+}
+
+func CreateAppEndpoint(w http.ResponseWriter, req *http.Request) {  // Works
+	defer req.Body.Close()
+	var appl App
+	if err := json.NewDecoder(req.Body).Decode(&appl); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+  appl.ID = bson.NewObjectId()
+	if err := dao.NewApp(appl); err != nil {
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else {
+		respondWithJson(w, http.StatusCreated, appl)
+	}
+}
+
+// Parse the configuration file and establish a connection to the DB
+func init() {
+	// config.Read()
+	//
+	dao.Addrs = []string{"10.5.0.2"}
+	dao.Timeout = 60 * time.Second
+	dao.Database = "admin"
+	dao.Username = "admin"
+	dao.Password = "password"
+	dao.Connect()
+
+}
+
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	respondWithJson(w, code, map[string]string{"error": msg})
+}
+
+func respondWithJson(w http.ResponseWriter, code int, payload interface{}) {
+	response, _ := json.Marshal(payload)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(response)
+}
+
 
 func main() {
 
-	// connect to the database
-	mongoDBDialInfo := &mgo.DialInfo{
-		Addrs:    []string{DB_HOST},
-		Timeout:  60 * time.Second,
-		Database: "admin",
-		Username: "admin",
-		Password: "password",
-	}
-
-	db, err := mgo.DialWithInfo(mongoDBDialInfo)
-	if err != nil {
-		log.Fatal("cannot dial mongo", err)
-	}
-	defer db.Close() // clean up when we're done
-
-	// Adapt our handle function using withDB
-	h := Adapt(http.HandlerFunc(handle), withDB(db))
-
-	// add the handler
-	http.Handle("/apps", context.ClearHandler(h))
+	router := mux.NewRouter()
+	router.HandleFunc("/auth", CreateTokenEndpoint).Methods("POST")
+	router.HandleFunc("/newapp", ValidateMiddleware(CreateAppEndpoint)).Methods("POST")
+	router.HandleFunc("/allapps", ValidateMiddleware(AllAppsEndpoint)).Methods("GET")
+	router.HandleFunc("/apps", ValidateMiddleware(FindAppsEndpoint)).Methods("GET")
 
 	// start the server
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe(":8080", router); err != nil {
 		log.Fatal(err)
 	}
 
