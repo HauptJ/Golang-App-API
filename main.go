@@ -163,7 +163,7 @@ func main() {
 	router.HandleFunc("/auth", CreateTokenEndpoint).Methods("POST")
 	router.HandleFunc("/newapp", ValidateMiddleware(CreateAppEndpoint)).Methods("POST")
 	router.HandleFunc("/allapps", ValidateMiddleware(AllAppsEndpoint)).Methods("GET")
-	router.HandleFunc("/apps", ValidateMiddleware(FindAppsEndpoint)).Methods("GET")
+	router.HandleFunc("/apps{company}", ValidateMiddleware(FindAppsEndpoint)).Methods("GET")
 
 	// start the server
 	if err := http.ListenAndServe(":8080", router); err != nil {
